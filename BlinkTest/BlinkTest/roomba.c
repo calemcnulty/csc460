@@ -50,7 +50,7 @@ void Roomba_Init()
 		_delay_ms(50);
 	}
 
-	uart_init(UART_19200);
+	//uart_init(UART_19200);
 
 	// start the Roomba's SCI
 	uart_putchar(START);
@@ -62,12 +62,12 @@ void Roomba_Init()
 	// that.  38400 at 0.2% is sufficient for our purposes.  An 18.432 MHz crystal will generate all the Roomba's
 	// baud rates with 0.0% error!.  Anyway, the point is we want to use a 38400 bps baud rate to avoid framing
 	// errors.  Also, we have to wait for 100 ms after changing the baud rate.
-	uart_putchar(BAUD);
-	uart_putchar(ROOMBA_38400BPS);
+	//uart_putchar(BAUD);
+	//uart_putchar(ROOMBA_19200BPS);
 	_delay_ms(100);
 
 	// change the AVR's UART clock to the new baud rate.
-	uart_init(UART_38400);
+	//uart_init(UART_19200);
 
 	// put the Roomba into safe mode.
 	uart_putchar(CONTROL);
@@ -257,4 +257,23 @@ uint8_t Roomba_BumperActivated(roomba_sensor_data_t* sensor_data)
 {
 	// if either of the bumper bits is set, then return true.
 	return (sensor_data->bumps_wheeldrops & 0x03) != 0;
+}
+
+void Roomba_Workout() {
+	
+	Roomba_Drive(200, 0x8000);
+	_delay_ms(1000);
+	Roomba_Drive(0, 0x8000);
+	_delay_ms(200);
+	Roomba_Drive(200, 50);
+	_delay_ms(1000);
+	Roomba_Drive(0, 0);
+	_delay_ms(200);
+	Roomba_Drive(200, -50);
+	_delay_ms(1000);
+	Roomba_Drive(0, 0);
+	_delay_ms(50);
+	Roomba_Drive(200, 0x8000);
+	_delay_ms(2000);
+	Roomba_Drive(0, 0);
 }

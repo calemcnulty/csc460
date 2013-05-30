@@ -13,12 +13,23 @@
 #include <string.h>
 #include "roomba.h"
 
-#define BAUDRATE 38400
+#define BAUDRATE 19200
 #define BAUD_PRESCALER (((F_CPU / (BAUDRATE * 16UL))) - 1)
+#define SONAR_METER 364
+
+// bit masks for flags
+#define PIR1_ON		PINB & _BV(PB4)
+#define PIR2_ON		PINB & _BV(PB3)
+#define SEARCHING	0
+#define SEEKING		1
+#define LOCKED_ON	2
 
 volatile uint16_t timer;
 volatile uint16_t elapsed;
+volatile uint16_t mindist;
+volatile uint8_t sentry_state = 0;
 char* s;
+roomba_sensor_data_t sensor;
 
 void UART_init(void) {
 	
@@ -44,71 +55,112 @@ unsigned char UART_receive(void) {
 	
 }
 
-void sonar_send () {
+void sonar_send() {
 	PORTD |= _BV(PD6);
 	_delay_ms(100);
 	PORTD &= ~_BV(PD6);
 }
 
-void avr_init() {
-	
-	
+void sonar_update() {
+
+	if (elapsed) {
+		elapsed = 0;
+		_delay_ms(100);
+		sonar_send();
+	}
 }
+
+void seek() {
+	int time_itter = TCNT1;
+	Roomba_Drive(200, 20);
+	while (time_itter - TCNT1 > 500) {
+		if (mindist > elapsed + 10) {
+			mindist = elapsed;
+			sonar_update();
+		}
+	}
+	Roomba_Drive(-200, 20);
+	time_itter = TCNT1;
+	while (time_itter - TCNT1){
+		
+	}
+}
+
 
 int main(void)
 {
-	s = (char *)malloc(sizeof(char) * 16);
-
 	PCICR |= (_BV(PCIE0) | _BV(PCIE2));  //enable interrupts 1 & 0
 	PCMSK0 |= _BV(PCINT4);
 	PCMSK2 |= _BV(PCINT23);
-	
-	//UART_init();
+
+	UART_init();
+	s = (char*)malloc(sizeof(char));
 
 	sei();
 	DDRB |= _BV(PB5);
 	DDRB &= ~_BV(PB4);
+	DDRB &= ~_BV(PB3);
 	DDRD |= _BV(PD6);
 	DDRD &= ~_BV(PD7);
 	TCCR1B = _BV(CS12);
-	//DDRD &= ~_BV(PD0);
-	//DDRD |= _BV(PD1);
+	DDRD &= ~_BV(PD0);
+	DDRD |= _BV(PD1);
 	DDRD |= _BV(PD3);
 
 	uint8_t notes[8] = {60, 69, 60, 69, 60, 69, 60, 69};
 	uint8_t durrs[8] = {16, 16, 16, 16, 16, 16, 16, 16};
-		
+	
 
+	/*
 	Roomba_Init();
+	_delay_ms(100);
 	Roomba_LoadSong(0, notes, durrs, 8);
+	_delay_ms(100);
 	Roomba_PlaySong(0);
-	Roomba_Drive(200, 0x8000);
+	_delay_ms(100);
+	
+	Roomba_Workout();*/
 
 	elapsed = 1; //ugly hack to force conditional on first iteration
 
     while(1) {
-			//This block sends sonar data to the computer over UART.  
-			//It'll scare and confuse the Roomba.
 		if (elapsed) {
-			/*itoa(elapsed, s, 10);
+			s = itoa(elapsed, s, 10);
 			strcat(s, "\n");
-			UART_send(s);*/
-			elapsed = 0;	
-			_delay_ms(100);
-			sonar_send();
+			UART_send(s);
+			sonar_update();
 		}
-    }
+		/*switch (sentry_state) {
+			case SEARCHING:
+				sonar_update();
+				break;
+			case SEEKING:
+				seek();
+				break;
+			case LOCKED_ON:
+				//lock_maintain();
+				break;
+			default:
+				sonar_update();	
+		}	*/
+    }			
 }
-/*
+
+// PIR interrupt handler
 ISR(PCINT0_vect) {
 	
-	if (PINB & _BV(PB4)) {
-		PORTB |= _BV(PB5);
+	if (PIR1_ON) {
+		if (sentry_state == SEARCHING) sentry_state = SEEKING;
+		mindist = elapsed;
 	} else {
-		PORTB &= ~_BV(PB5);
+	}
+	if (PIR2_ON) {
+		if (sentry_state == SEARCHING) sentry_state = SEEKING;
+		mindist = elapsed;
+	} else {
 	}
 }
-*/
+
 
 // TODO: on receiving signal, set start, wait for square wave to drop, measure elapsed, then send it.
 ISR(PCINT2_vect) {
@@ -116,11 +168,7 @@ ISR(PCINT2_vect) {
 	if (PIND & _BV(PD7)) {
 		timer = TCNT1;
 		elapsed = 0;
-		//PORTB |= _BV(PB5);	
 	} else {
 		elapsed = TCNT1 - timer;
-		//PORTB &= ~_BV(PB5);
 	}
 }
-
-
