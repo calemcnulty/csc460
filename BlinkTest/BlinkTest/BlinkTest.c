@@ -27,7 +27,8 @@
 volatile uint16_t timer;
 volatile uint16_t elapsed;
 volatile uint16_t mindist;
-volatile uint8_t sentry_state = 0;
+volatile uint16_t PIR_time;
+volatile uint8_t sentry_state = SEARCHING;
 char* s;
 roomba_sensor_data_t sensor;
 
@@ -71,6 +72,16 @@ void sonar_update() {
 }
 
 void seek() {
+	/*if (PIR1_ON & ~PIR2_ON) {
+		Roomba_Drive(200, -1);
+		_delay_ms(1000);
+		Roomba_Drive(0, 0x8000);
+	} else if (PIR2_ON & ~PIR1_ON) {
+		Roomba_Drive(200, 1);
+		_delay_ms(1000);
+		Roomba_Drive(0, 0x8000);
+	}*/
+/*	
 	int time_itter = TCNT1;
 	Roomba_Drive(200, 20);
 	while (time_itter - TCNT1 > 500) {
@@ -81,9 +92,7 @@ void seek() {
 	}
 	Roomba_Drive(-200, 20);
 	time_itter = TCNT1;
-	while (time_itter - TCNT1){
-		
-	}
+	*/
 }
 
 
@@ -94,7 +103,7 @@ int main(void)
 	PCMSK2 |= _BV(PCINT23);
 
 	UART_init();
-	s = (char*)malloc(sizeof(char));
+	//s = (char*)malloc(sizeof(char));
 
 	sei();
 	DDRB |= _BV(PB5);
@@ -111,12 +120,12 @@ int main(void)
 	uint8_t durrs[8] = {16, 16, 16, 16, 16, 16, 16, 16};
 	
 
-	/*
+	
 	Roomba_Init();
 	_delay_ms(100);
 	Roomba_LoadSong(0, notes, durrs, 8);
 	_delay_ms(100);
-	Roomba_PlaySong(0);
+	/*Roomba_PlaySong(0);
 	_delay_ms(100);
 	
 	Roomba_Workout();*/
@@ -124,40 +133,55 @@ int main(void)
 	elapsed = 1; //ugly hack to force conditional on first iteration
 
     while(1) {
-		if (elapsed) {
+		/*if (elapsed) {
 			s = itoa(elapsed, s, 10);
 			strcat(s, "\n");
 			UART_send(s);
 			sonar_update();
-		}
-		/*switch (sentry_state) {
+		}*/
+		switch (sentry_state) {
 			case SEARCHING:
 				sonar_update();
+				PORTB ^= _BV(PB5);
+				_delay_ms(500);
 				break;
 			case SEEKING:
-				seek();
+				PORTB ^= _BV(PB5);
+				_delay_ms(50);		
+				sonar_update();
+				//seek();
 				break;
 			case LOCKED_ON:
 				//lock_maintain();
 				break;
 			default:
 				sonar_update();	
-		}	*/
+		}	
     }			
 }
 
 // PIR interrupt handler
 ISR(PCINT0_vect) {
-	
-	if (PIR1_ON) {
-		if (sentry_state == SEARCHING) sentry_state = SEEKING;
-		mindist = elapsed;
-	} else {
+
+	if (PIR1_ON && PIR2_ON) {
+		if (sentry_state == SEARCHING) {
+			sentry_state = SEEKING; 
+			mindist = elapsed;
+		}		
 	}
-	if (PIR2_ON) {
-		if (sentry_state == SEARCHING) sentry_state = SEEKING;
-		mindist = elapsed;
-	} else {
+	else if (PIR1_ON) {
+		if (sentry_state == SEARCHING) {			
+			sentry_state = SEEKING;
+			mindist = elapsed;
+		}
+	} else if (PIR2_ON) {
+
+		if (sentry_state == SEARCHING) {
+			sentry_state = SEEKING;
+			mindist = elapsed;
+		}
+	} else  {
+
 	}
 }
 
