@@ -71,30 +71,66 @@ void sonar_update() {
 	}
 }
 
-void seek() {
-	/*if (PIR1_ON & ~PIR2_ON) {
-		Roomba_Drive(200, -1);
-		_delay_ms(1000);
+void search() {
+	
+	// static vars to keep track of how often search() has been called and
+	// what direction the Roomba should spin
+	static uint8_t count = 0;
+	static uint8_t dir = 1;
+	
+	if (count < 10) {
+		Roomba_Drive(100, dir);
+		_delay_ms(100);
 		Roomba_Drive(0, 0x8000);
-	} else if (PIR2_ON & ~PIR1_ON) {
-		Roomba_Drive(200, 1);
-		_delay_ms(1000);
-		Roomba_Drive(0, 0x8000);
-	}*/
-/*	
-	int time_itter = TCNT1;
-	Roomba_Drive(200, 20);
-	while (time_itter - TCNT1 > 500) {
-		if (mindist > elapsed + 10) {
-			mindist = elapsed;
-			sonar_update();
-		}
+		_delay_ms(10);
+		count++;
 	}
-	Roomba_Drive(-200, 20);
-	time_itter = TCNT1;
-	*/
+	
+	// once it's turned 10 times, switch directions and start again
+	if (count == 10) {
+		count = 0;
+		dir *= -1;
+	}
 }
 
+// find closest object within field of view of PIR sensor
+void seek() {
+	
+	int i;
+	// spin left
+	Roomba_Drive(50, 1);
+	
+	// find closest object on left
+	for (i = 0; i < 20; i++) {
+		sonar_update();
+		if (elapsed < mindist) mindist = elapsed;
+	}
+	
+	// spin right
+	Roomba_Drive(50, -1);
+	
+	// find closest object on right
+	for (i = 0; i < 40; i++) {
+		sonar_update();
+		if (elapsed < mindist) mindist = elapsed;
+	}
+	
+	// track left until intruder dead ahead
+	Roomba_Drive(50, 1);
+	while (elapsed > mindist + 20) {
+		sonar_update();
+	}
+	Roomba_Drive(0, 0x8000);
+	_delay_ms(50);
+	Roomba_PlaySong(0);
+	_delay_ms(50);
+	sentry_state = LOCKED_ON;
+}
+
+void maintain_lock() {
+	Roomba_PlaySong(sentry_state);
+	while (1);
+}
 
 int main(void)
 {
@@ -116,43 +152,42 @@ int main(void)
 	DDRD |= _BV(PD1);
 	DDRD |= _BV(PD3);
 
-	uint8_t notes[8] = {60, 69, 60, 69, 60, 69, 60, 69};
+	uint8_t notes[3][8] = {{60, 69, 60, 69, 60, 69, 60, 69},
+						   {64, 73, 64, 73, 64, 73, 64, 73},
+						   {69, 78, 69, 78, 69, 78, 69, 78}};
 	uint8_t durrs[8] = {16, 16, 16, 16, 16, 16, 16, 16};
 	
 
 	
 	Roomba_Init();
 	_delay_ms(100);
-	Roomba_LoadSong(0, notes, durrs, 8);
+	Roomba_LoadSong(SEARCHING, notes[SEARCHING], durrs, 8);
+	Roomba_LoadSong(SEEKING, notes[SEEKING], durrs, 8);
+	Roomba_LoadSong(LOCKED_ON, notes[LOCKED_ON], durrs, 8);
 	_delay_ms(100);
-	/*Roomba_PlaySong(0);
+	Roomba_PlaySong(0);
 	_delay_ms(100);
 	
-	Roomba_Workout();*/
-
-	elapsed = 1; //ugly hack to force conditional on first iteration
+	// PIR warmup
+	_delay_ms(45000);
 
     while(1) {
-		/*if (elapsed) {
-			s = itoa(elapsed, s, 10);
-			strcat(s, "\n");
-			UART_send(s);
-			sonar_update();
-		}*/
+		
 		switch (sentry_state) {
 			case SEARCHING:
 				sonar_update();
-				PORTB ^= _BV(PB5);
-				_delay_ms(500);
+				search();
 				break;
 			case SEEKING:
-				PORTB ^= _BV(PB5);
-				_delay_ms(50);		
+				Roomba_PlaySong(sentry_state);
+				_delay_ms(2000);
 				sonar_update();
-				//seek();
+				seek();
 				break;
 			case LOCKED_ON:
-				//lock_maintain();
+				PORTB ^= _BV(PB5);
+				_delay_ms(50);
+				maintain_lock();
 				break;
 			default:
 				sonar_update();	
@@ -162,19 +197,20 @@ int main(void)
 
 // PIR interrupt handler
 ISR(PCINT0_vect) {
-
+/*
 	if (PIR1_ON && PIR2_ON) {
 		if (sentry_state == SEARCHING) {
 			sentry_state = SEEKING; 
 			mindist = elapsed;
 		}		
-	}
-	else if (PIR1_ON) {
+	}*/
+    if (PIR1_ON) {
 		if (sentry_state == SEARCHING) {			
 			sentry_state = SEEKING;
 			mindist = elapsed;
 		}
-	} else if (PIR2_ON) {
+		
+	} /*else if (PIR2_ON) {
 
 		if (sentry_state == SEARCHING) {
 			sentry_state = SEEKING;
@@ -182,7 +218,7 @@ ISR(PCINT0_vect) {
 		}
 	} else  {
 
-	}
+	}*/
 }
 
 
