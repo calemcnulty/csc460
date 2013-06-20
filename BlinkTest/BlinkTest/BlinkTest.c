@@ -154,9 +154,9 @@ void maintain_lock() {
 		sonar_update();
 		
 		if (sonar_elapsed > SONAR_METER_HIGH) {
-			Roomba_Drive(40, 0x8000);
+			Roomba_Drive(240, 0x8000);
 		} else if (sonar_elapsed < SONAR_METER_LOW) {
-			Roomba_Drive(-40, 0x8000);
+			Roomba_Drive(-240, 0x8000);
 		} else {
 			Roomba_Drive(0, 0x8000);
 		}
