@@ -2,7 +2,7 @@
  * GccApplication1.c
  *
  * Created: 5/7/2013 2:55:42 PM
- *  Author: nrqm
+ *  Author: Cale McNulty
  */ 
 
 
@@ -15,22 +15,24 @@
 
 #define BAUDRATE 19200
 #define BAUD_PRESCALER (((F_CPU / (BAUDRATE * 16UL))) - 1)
-#define SONAR_METER 364
+#define SONAR_METER_LOW 10500
+#define SONAR_METER_HIGH 15000
 
 // bit masks for flags
-#define PIR1_ON		PINB & _BV(PB4)
-#define PIR2_ON		PINB & _BV(PB3)
+#define PIR1_ON		PIND & _BV(PD7)
 #define SEARCHING	0
 #define SEEKING		1
 #define LOCKED_ON	2
 
-volatile uint16_t sonar_timer;
+volatile uint16_t sonar_start;
+volatile uint16_t sonar_end;
 volatile uint16_t sonar_elapsed;
 volatile uint16_t mindist;
 volatile uint8_t sentry_state;
 char* s;
 roomba_sensor_data_t sensor;
 
+// initialize UART registers
 void UART_init(void) {
 	
 	UBRR0H = (uint8_t)(BAUD_PRESCALER >> 8);
@@ -39,6 +41,7 @@ void UART_init(void) {
 	UCSR0C = (3<<UCSZ00);
 }
 
+// send a bytestream over UART
 void UART_send(char* data) {
 	
 	while (*data) {
@@ -48,6 +51,7 @@ void UART_send(char* data) {
 	}
 }
 
+// receive data from UART
 unsigned char UART_receive(void) {
 	
 	while(!(UCSR0A & (1<<RXC0)));
@@ -55,24 +59,52 @@ unsigned char UART_receive(void) {
 	
 }
 
+void sonar_init() {
+	
+	// set up ICP register
+	DDRB &= ~_BV(PB0);
+	PORTB |= _BV(PB0);
+	
+	// set timer control reg to trigger on rising
+	TCCR1B |= _BV(ICES1);
+	
+	// enable noise filter
+	TCCR1B |= _BV(ICNC1);
+	
+	// enable input capture for timer mask
+	TIMSK1 |= _BV(ICIE1);
+	
+	// set up prescaler
+	TCCR1B |=  _BV(CS11);
+	
+}
+
+// send a trigger pulse then clear the timer counter
 void sonar_send() {
+	
 	PORTD |= _BV(PD6);
-	_delay_ms(5);
+	_delay_us(150);
 	PORTD &= ~_BV(PD6);
+	
+	// easier than dealing with overflows
+	TCNT1 = 0;
+	
 }
 
+// send a timer pulse then wait long enough for it to get back
 void sonar_update() {
-		
-		PORTB &= ~_BV(PB5);
-		sonar_send();
-		_delay_ms(100);
-		if (sonar_elapsed == 0) PORTB |= _BV(PB5);
-		
+	
+	sonar_send();
+	_delay_ms(100);
+
 }
 
+// drive around in a circle.  PIR interrupt 
+// will break out of this state
 void search() {
-		_delay_ms(10);
-		Roomba_Drive(40, 200);
+	
+	_delay_ms(10);
+	Roomba_Drive(40, 200);
 }
 
 // find closest object within field of view of PIR sensor
@@ -83,7 +115,7 @@ void seek() {
 	Roomba_Drive(0, 0x8000);
 	_delay_ms(10);		
 	Roomba_PlaySong(sentry_state);
-	_delay_ms(500);	
+	_delay_ms(50);	
 	
 	// spin left
 	Roomba_Drive(50, 1);
@@ -91,7 +123,7 @@ void seek() {
 	// find closest object on left
 	for (i = 0; i < 30; i++) {
 		sonar_update();
-		if (sonar_elapsed < mindist && sonar_elapsed > 10) mindist = sonar_elapsed;
+		if (sonar_elapsed < mindist) mindist = sonar_elapsed;
 	}
 	
 	// spin right
@@ -100,14 +132,13 @@ void seek() {
 	// find closest object on right
 	for (i = 0; i < 60; i++) {
 		sonar_update();
-		if (sonar_elapsed < mindist && sonar_elapsed > 10) mindist = sonar_elapsed;
+		if (sonar_elapsed < mindist) mindist = sonar_elapsed;
 	}
 	
 	// track left until intruder dead ahead
 	Roomba_Drive(50, 1);
-	while (sonar_elapsed > mindist) {
+	while (sonar_elapsed > mindist + 100) {
 		sonar_update();
-		_delay_ms(50);
 	}
 	Roomba_Drive(0, 0x8000);
 	_delay_ms(50);
@@ -116,17 +147,15 @@ void seek() {
 
 void maintain_lock() {
 	Roomba_PlaySong(sentry_state);
-	_delay_ms(1500);
+	_delay_ms(15);
 	
 	// keep target more or less 1m away
-	// 1m measured at 346 ticks back in the days of yore
 	while (1) {
-		_delay_ms(10);
 		sonar_update();
-		_delay_ms(50);
-		if (sonar_elapsed > 370) {
+		
+		if (sonar_elapsed > SONAR_METER_HIGH) {
 			Roomba_Drive(40, 0x8000);
-		} else if (sonar_elapsed < 320 && sonar_elapsed != 0) {
+		} else if (sonar_elapsed < SONAR_METER_LOW) {
 			Roomba_Drive(-40, 0x8000);
 		} else {
 			Roomba_Drive(0, 0x8000);
@@ -134,56 +163,67 @@ void maintain_lock() {
 	}
 }
 
-int main(void)
-{
-	PCICR |= (_BV(PCIE0) | _BV(PCIE2));  //enable interrupts 1 & 0
-	PCMSK0 |= _BV(PCINT4);
-	PCMSK2 |= _BV(PCINT23);
+void sentry_init() {
 
-	//timer init
-	TCNT1 = 0;
-	
-	//TODO fix the damned timer.
-	/*OCR1A = 62500;
-	TIMSK1 = _BV(OCIE1A);*/
-	TCCR1B = _BV(CS12);
+	//enable interrupts
+	PCICR |= (_BV(PCIE0) | _BV(PCIE2));  
+	PCMSK2 |= _BV(PCINT23);
 	
 	UART_init();
-
-	// initialize Data Direction Registers
+	sonar_init();
 	sei();
+	
+	// initialize Data Direction Registers
 	DDRB |= _BV(PB5);
 	DDRB &= ~_BV(PB4);
+	DDRB &= ~_BV(PD7);
 	DDRD |= _BV(PD6);
-	DDRD &= ~_BV(PD7);
 	DDRD &= ~_BV(PD0);
 	DDRD |= _BV(PD1);
 	DDRD |= _BV(PD3);
+}
 
-	// Set up Roomba
+// initialize Roomba, load songs, and the like
+void Roomba_Setup () {
+
+	// each state has a progressively higher-pitched song
 	uint8_t notes[3][8] = {{60, 69, 60, 69, 60, 69, 60, 69},
 						   {64, 73, 64, 73, 64, 73, 64, 73},
 						   {69, 78, 87, 78, 69, 78, 87, 78}};
 	uint8_t durrs[8] = {16, 16, 16, 16, 16, 16, 16, 16};
+	
 	Roomba_Init();
-	_delay_ms(100);
+	_delay_ms(10);
 	Roomba_LoadSong(SEARCHING, notes[SEARCHING], durrs, 8);
 	Roomba_LoadSong(SEEKING, notes[SEEKING], durrs, 8);
 	Roomba_LoadSong(LOCKED_ON, notes[LOCKED_ON], durrs, 8);
-	_delay_ms(100);
+	_delay_ms(10);	
+}
+
+// my kingdom for a printf
+void debug() {
 	
+	s = (char*)malloc(64);
+	while(1) {
+		sonar_update();
+		sprintf(s, "%u, %u, %u\n", sonar_start, sonar_end, sonar_elapsed);
+		UART_send(s);
+	}	
+}
+
+int main(void)
+{
+	sentry_init();
+	Roomba_Setup();
+	
+	// verify Roomba is working with a nice ditty	
 	Roomba_PlaySong(0);
 	
 	// PIR warmup
 	_delay_ms(15000);
 	sentry_state = SEARCHING;
-	s = (char *)malloc(16);
-    while(1) {
-		/*sonar_update();
-		s = itoa(sonar_elapsed, s, 10);
-		strcat(s, "\n");
-		UART_send(s);
-		*/
+
+	while (1) {
 		switch (sentry_state) {
 			case SEARCHING:
 				search();
@@ -204,23 +244,36 @@ int main(void)
 }
 
 // PIR interrupt handler
-ISR(PCINT0_vect) {
+ISR(PCINT2_vect) {
 
     if (PIR1_ON) {
 		if (sentry_state == SEARCHING) {			
 			sentry_state = SEEKING;		
-		}
-		
+		}		
 	}
 }
 
-
-// TODO: on receiving signal, set start, wait for square wave to drop, measure elapsed, then send it.
-ISR(PCINT2_vect) {
+// ICP timer interrupt handler for sonar
+ISR(TIMER1_CAPT_vect) {
 	
-	if (PIND & _BV(PD7)) {
-		sonar_timer = TCNT1;
-	} else {
-		sonar_elapsed = TCNT1 - sonar_timer;
+	// if echo is a rising edge	
+	if (TCCR1B & _BV(ICES1)) {
+	
+		// set initial time to Input Capture Register
+		sonar_start = ICR1;
+		
+		// set Timer Control to trigger on falling edge
+		TCCR1B &= ~_BV(ICES1);
+	
+	// if falling edge	
+	} else { //if (TCCR1B ^ _BV(ICES1)) {
+
+		sonar_end = ICR1;
+		
+		// calculate elapsed
+		sonar_elapsed = sonar_end - sonar_start;
+		
+		//tell timer control register to look for rising edge
+		TCCR1B |= _BV(ICES1);
 	}
 }
