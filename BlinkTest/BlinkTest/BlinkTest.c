@@ -95,7 +95,7 @@ void sonar_send() {
 void sonar_update() {
 	
 	sonar_send();
-	_delay_ms(100);
+	_delay_ms(80);
 
 }
 
@@ -130,14 +130,14 @@ void seek() {
 	Roomba_Drive(50, -1);
 	
 	// find closest object on right
-	for (i = 0; i < 60; i++) {
+	for (i = 0; i < 45; i++) {
 		sonar_update();
 		if (sonar_elapsed < mindist) mindist = sonar_elapsed;
 	}
 	
 	// track left until intruder dead ahead
 	Roomba_Drive(50, 1);
-	while (sonar_elapsed > mindist + 100) {
+	while (sonar_elapsed > mindist + 200) {
 		sonar_update();
 	}
 	Roomba_Drive(0, 0x8000);
@@ -154,9 +154,9 @@ void maintain_lock() {
 		sonar_update();
 		
 		if (sonar_elapsed > SONAR_METER_HIGH) {
-			Roomba_Drive(240, 0x8000);
+			Roomba_Drive(200, 0x8000);
 		} else if (sonar_elapsed < SONAR_METER_LOW) {
-			Roomba_Drive(-240, 0x8000);
+			Roomba_Drive(-200, 0x8000);
 		} else {
 			Roomba_Drive(0, 0x8000);
 		}
@@ -270,7 +270,7 @@ ISR(TIMER1_CAPT_vect) {
 
 		sonar_end = ICR1;
 		
-		// calculate elapsed
+		// calculate elapsed with bit of fudging to throw out anomalous values
 		sonar_elapsed = sonar_end - sonar_start;
 		
 		//tell timer control register to look for rising edge
